@@ -112,7 +112,7 @@ async def test_send_file_passes_topic_id_as_reply_to(tmp_path, monkeypatch):
 
     result = await media.send_file("ForumChat", "doc.pdf", caption="hello", topic_id=42)
 
-    assert result == f"File sent to chat ForumChat from {path}."
+    assert result == "File sent to chat ForumChat."
     assert client.sent == {
         "entity": "entity:forum",
         "file_paths": str(path),
@@ -178,7 +178,8 @@ async def test_send_file_schedules_when_schedule_date_given(tmp_path, monkeypatc
         "Channel", "poster.png", caption="later", schedule_date=when.isoformat()
     )
 
-    assert result == f"File from {path} scheduled for {when.isoformat()} in chat Channel."
+    assert result == f"File scheduled for {when.isoformat()} in chat Channel."
+    assert str(path) not in result
     assert client.schedule == when
 
 

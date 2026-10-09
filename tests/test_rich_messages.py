@@ -93,8 +93,13 @@ async def test_send_rich_other_rpc_error_propagates():
 class _EditRecorder:
     """Records how edit_message forwards parse_mode to Telethon."""
 
-    def __init__(self):
+    def __init__(self, *, outgoing=True):
         self.calls = []
+
+        self.message = SimpleNamespace(out=outgoing)
+
+    async def get_messages(self, entity, ids):
+        return self.message
 
     async def edit_message(self, entity, message_id, text, **kwargs):
         self.calls.append(kwargs)
@@ -118,6 +123,51 @@ async def test_edit_message_omits_parse_mode_when_not_given(monkeypatch):
 
     await messages.edit_message(chat_id=1, message_id=2, new_text="x", parse_mode="html")
     assert cl.calls[-1] == {"parse_mode": "html"}
+
+
+@pytest.mark.asyncio
+async def test_edit_message_refuses_incoming_message(monkeypatch):
+    cl = _EditRecorder(outgoing=False)
+    monkeypatch.setattr(messages, "get_client", lambda account=None: cl)
+
+    async def fake_resolve(chat_id, client=None):
+        return "entity"
+
+    monkeypatch.setattr(messages, "resolve_entity", fake_resolve)
+
+    result = json.loads(await messages.edit_message(chat_id=1, message_id=2, new_text="no"))
+
+    assert result == {"edited": False, "reason": "not_own_message"}
+    assert cl.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outgoing", [False, True])
+async def test_delete_message_only_deletes_outgoing(monkeypatch, outgoing):
+    class Client:
+        deleted = []
+
+        async def get_messages(self, entity, ids):
+            return SimpleNamespace(out=outgoing)
+
+        async def delete_messages(self, entity, message_id):
+            self.deleted.append((entity, message_id))
+
+    cl = Client()
+    monkeypatch.setattr(messages, "get_client", lambda account=None: cl)
+
+    async def fake_resolve(chat_id, client=None):
+        return "entity"
+
+    monkeypatch.setattr(messages, "resolve_entity", fake_resolve)
+    result = await messages.delete_message(chat_id=1, message_id=2)
+
+    if outgoing:
+        assert result == "Message 2 deleted."
+        assert cl.deleted == [("entity", 2)]
+    else:
+        assert json.loads(result) == {"deleted": False, "reason": "not_own_message"}
+        assert cl.deleted == []
 
 
 @pytest.mark.asyncio

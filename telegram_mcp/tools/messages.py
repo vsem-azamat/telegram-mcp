@@ -895,6 +895,7 @@ async def send_message(
     custom_emojis: Optional[List[Dict[str, Any]]] = None,
     account: Optional[str] = None,
     reply_to: Optional[int] = None,
+    custom_emoji_id: Optional[Union[int, str]] = None,
 ) -> str:
     """
     Send a message to a specific chat.
@@ -931,6 +932,9 @@ async def send_message(
             (it can expire or be bought at any time).
         reply_to: Optional id of a message in the same chat to reply to. To post
             in a forum topic, pass the topic id (from list_topics).
+        custom_emoji_id: Optional Telegram custom-emoji document ID. When set, the first
+            Unicode character in the plain-text message is sent as that custom emoji.
+            Cannot be combined with parse_mode.
     """
     try:
         cl = get_client(account)
@@ -946,6 +950,24 @@ async def send_message(
                 chat_id=chat_id,
             )
 
+        if custom_emoji_id is not None:
+            if parse_mode or format_date or custom_emojis:
+                return (
+                    "custom_emoji_id cannot be combined with parse_mode, format_date "
+                    "or custom_emojis."
+                )
+            if not message:
+                return "custom_emoji_id requires a non-empty message."
+            first_char_utf16_length = len(message[0].encode("utf-16-le")) // 2
+            formatting_entities = [
+                types.MessageEntityCustomEmoji(
+                    offset=0,
+                    length=first_char_utf16_length,
+                    document_id=int(custom_emoji_id),
+                )
+            ]
+            await cl.send_message(entity, message, formatting_entities=formatting_entities)
+            return "Message sent successfully."
         conflict = _plain_text_conflict(parse_mode, format_date, custom_emojis)
         if conflict:
             return conflict
@@ -2033,6 +2055,9 @@ async def edit_message(
         conflict = _plain_text_conflict(parse_mode, format_date, custom_emojis)
         if conflict:
             return conflict
+        message = await cl.get_messages(entity, ids=message_id)
+        if not message or not getattr(message, "out", False):
+            return json.dumps({"edited": False, "reason": "not_own_message"})
         if parse_mode and parse_mode.lower() in RICH_PARSE_MODES:
             return await _edit_rich(cl, entity, message_id, new_text, parse_mode.lower())
         if format_date or custom_emojis:
@@ -2095,6 +2120,9 @@ async def delete_message(
         entity = await resolve_entity(chat_id, cl)
         if await _ids_outside_chat(cl, entity, [message_id]):
             return f"Message {message_id} is not in chat {chat_id}; nothing was deleted."
+        message = await cl.get_messages(entity, ids=message_id)
+        if not message or not getattr(message, "out", False):
+            return json.dumps({"deleted": False, "reason": "not_own_message"})
         await cl.delete_messages(entity, message_id)
         return f"Message {message_id} deleted."
     except Exception as e:
@@ -2245,7 +2273,10 @@ async def pin_message(
 @with_account(readonly=False)
 @validate_id("chat_id")
 async def unpin_message(
-    chat_id: Union[int, str], message_id: int, account: Optional[str] = None
+    chat_id: Union[int, str],
+    message_id: int,
+    account: Optional[str] = None,
+    notify: bool = False,
 ) -> str:
     """
     Unpin a message in a chat.
@@ -2253,7 +2284,7 @@ async def unpin_message(
     try:
         cl = get_client(account)
         entity = await resolve_entity(chat_id, cl)
-        await cl.unpin_message(entity, message_id)
+        await cl.unpin_message(entity, message_id, notify=notify)
         return f"Message {message_id} unpinned in chat {chat_id}."
     except Exception as e:
         return log_and_format_error("unpin_message", e, chat_id=chat_id, message_id=message_id)

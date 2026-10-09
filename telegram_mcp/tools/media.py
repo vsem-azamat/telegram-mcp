@@ -110,8 +110,8 @@ async def send_file(
             **_force_document_kwargs(force_document),
         )
         if dt:
-            return f"File from {safe_path} scheduled for {dt.isoformat()} in chat {chat_id}."
-        return f"File sent to chat {chat_id} from {safe_path}."
+            return f"File scheduled for {dt.isoformat()} in chat {chat_id}."
+        return f"File sent to chat {chat_id}."
     except Exception as e:
         return log_and_format_error(
             "send_file",
@@ -364,7 +364,7 @@ async def send_voice(
 
         entity = await resolve_entity(chat_id, cl)
         await cl.send_file(entity, str(safe_path), voice_note=True, reply_to=topic_id)
-        return f"Voice message sent to chat {chat_id} from {safe_path}."
+        return f"Voice message sent to chat {chat_id}."
     except Exception as e:
         return log_and_format_error(
             "send_voice", e, chat_id=chat_id, file_path=file_path, topic_id=topic_id
@@ -397,7 +397,6 @@ async def upload_file(
 
         uploaded = await cl.upload_file(str(safe_path))
         payload = {
-            "path": str(safe_path),
             "name": getattr(uploaded, "name", safe_path.name),
             "size": getattr(uploaded, "size", safe_path.stat().st_size),
             "md5_checksum": getattr(uploaded, "md5_checksum", None),
@@ -488,7 +487,7 @@ async def send_sticker(
 
         entity = await resolve_entity(chat_id, cl)
         await cl.send_file(entity, str(safe_path), force_document=False, reply_to=topic_id)
-        return f"Sticker sent to chat {chat_id} from {safe_path}."
+        return f"Sticker sent to chat {chat_id}."
     except Exception as e:
         return log_and_format_error(
             "send_sticker", e, chat_id=chat_id, file_path=file_path, topic_id=topic_id

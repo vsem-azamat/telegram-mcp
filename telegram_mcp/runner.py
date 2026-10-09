@@ -227,13 +227,16 @@ async def _main() -> None:
                         file=sys.stderr,
                     )
                 except Exception as exc:
-                    print(f"Entity cache warm failed for '{label}': {exc}", file=sys.stderr)
+                    print(
+                        f"Entity cache warm failed for '{label}'; exception details redacted.",
+                        file=sys.stderr,
+                    )
 
             try:
                 await asyncio.gather(*(_warm_client(label, cl) for label, cl in clients.items()))
                 print("Entity caches warmed.", file=sys.stderr)
-            except Exception as warm_exc:
-                print(f"Entity cache warm failed: {warm_exc}", file=sys.stderr)
+            except Exception:
+                print("Entity cache warm failed; exception details redacted.", file=sys.stderr)
 
         asyncio.create_task(_warm_caches())
 
@@ -266,7 +269,7 @@ async def _main() -> None:
 
         await _serve(transport)
     except Exception as e:
-        print(f"Error starting client: {e}", file=sys.stderr)
+        print("Error starting client; exception details redacted.", file=sys.stderr)
         if isinstance(e, sqlite3.OperationalError) and "database is locked" in str(e):
             print(
                 "Database lock detected. Please ensure no other instances are running.",
