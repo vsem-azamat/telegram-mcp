@@ -708,6 +708,13 @@ async def test_event_of_a_chat_that_is_no_forum_has_no_topic():
 
 GRACE = types.User(id=43, first_name="Grace", photo=types.UserProfilePhoto(photo_id=777, dc_id=2))
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+GROUP_WITH_PHOTO = types.Channel(
+    id=SUPERGROUP_ID,
+    title="Group",
+    photo=types.ChatPhoto(photo_id=555, dc_id=2),
+    date=DATE,
+    megagroup=True,
+)
 
 
 def _sent_by(msg_id, sender):
@@ -771,13 +778,47 @@ async def test_profile_photo_of_a_peer_without_one(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_profile_photo_that_does_not_download_is_none(client, monkeypatch):
+async def test_profile_photo_that_does_not_download_is_an_error(client, monkeypatch):
     monkeypatch.setattr(events, "resolve_entity", AsyncMock(return_value=GRACE))
     client.download_profile_photo.return_value = None
 
+    result = await events.get_profile_photo(43, account="test")
+
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(result)
+
+
+@pytest.mark.asyncio
+async def test_profile_photo_of_a_channel(client, monkeypatch):
+    monkeypatch.setattr(events, "resolve_entity", AsyncMock(return_value=GROUP_WITH_PHOTO))
+    client.download_profile_photo.return_value = JPEG
+
+    result = json.loads(await events.get_profile_photo(MARKED_SUPERGROUP_ID, account="test"))
+
+    assert result["peer_id"] == MARKED_SUPERGROUP_ID and result["photo_id"] == "555"
+
+
+@pytest.mark.asyncio
+async def test_profile_photo_of_a_group_outside_the_allowlist_is_refused(client, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "-1009999999999")
+    monkeypatch.setattr(events, "resolve_entity", AsyncMock(return_value=GROUP_WITH_PHOTO))
+    client.download_profile_photo.return_value = JPEG
+
+    result = await events.get_profile_photo(MARKED_SUPERGROUP_ID, account="test")
+
+    assert "restricted" in result and "555" not in result
+    client.download_profile_photo.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_profile_photo_of_a_user_is_given_with_an_allowlist(client, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "-1009999999999")
+    monkeypatch.setattr(events, "resolve_entity", AsyncMock(return_value=GRACE))
+    client.download_profile_photo.return_value = JPEG
+
     result = json.loads(await events.get_profile_photo(43, account="test"))
 
-    assert result == {"peer_id": 43, "photo_id": ""}
+    assert result["photo_id"] == "777"
 
 
 @pytest.mark.asyncio

@@ -673,7 +673,9 @@ async def get_profile_photo(peer_id: Union[int, str], account: Optional[str] = N
     pixels a side), for integrators that show avatars (such as chat bridges).
     Returns JSON: peer_id, photo_id (the id get_messages_after names as
     sender_photo; "" when the peer has no photo or hides it), and with a photo
-    mime and data (base64).
+    mime and data (base64). A photo that cannot be downloaded is an error, not
+    an empty photo_id. Groups and channels outside TELEGRAM_ALLOWED_CHAT_IDS are
+    refused; users are not, since the senders of allowed groups are users.
 
     Args:
         peer_id: The ID or username of the user, group or channel.
@@ -684,17 +686,30 @@ async def get_profile_photo(peer_id: Union[int, str], account: Optional[str] = N
     try:
         cl = get_client(account)
         entity = await resolve_entity(peer_id, cl)
+        if (
+            isinstance(entity, (types.Chat, types.Channel))
+            and is_chat_allowlist_enabled()
+            and not is_chat_allowed(peer_id, entity)
+        ):
+            err = check_chat_access(peer_id, entity)
+            return log_and_format_error(
+                "get_profile_photo",
+                ChatAccessDeniedError(err),
+                prefix=ErrorCategory.PRIVACY,
+                user_message=err,
+                peer_id=peer_id,
+            )
         result: Dict[str, Any] = {
             "peer_id": get_marked_id(entity),
             "photo_id": _profile_photo_id(entity),
         }
         if result["photo_id"]:
             data = await cl.download_profile_photo(entity, file=bytes, download_big=False)
-            if data:
-                result["mime"] = "image/jpeg"
-                result["data"] = base64.b64encode(data).decode("ascii")
-            else:
-                result["photo_id"] = ""
+            if not data:
+                # Telethon answers some refused downloads with nothing.
+                raise ValueError("the profile photo could not be downloaded")
+            result["mime"] = "image/jpeg"
+            result["data"] = base64.b64encode(data).decode("ascii")
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         return log_and_format_error("get_profile_photo", e, peer_id=peer_id)
