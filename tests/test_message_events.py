@@ -553,6 +553,20 @@ async def test_send_message_replies_and_names_the_id(send_client):
     assert send_client.send_message.call_args.kwargs["reply_to"] == 5513
 
 
+@pytest.mark.asyncio
+async def test_custom_emoji_id_refuses_custom_emojis(send_client):
+    result = await messages.send_message(
+        42,
+        "🤖 hello",
+        custom_emoji_id="5359394246468057650",
+        custom_emojis=[{"emoji": "🤖", "id": "5359394246468057650"}],
+        account="test",
+    )
+
+    assert "cannot be combined" in result
+    send_client.send_message.assert_not_called()
+
+
 def test_raw_send_result_id_is_found():
     short = types.UpdateShortSentMessage(id=77, pts=1, pts_count=1, date=DATE)
     assert messages._first_sent_message_id(short) == 77
