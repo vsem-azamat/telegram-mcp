@@ -2118,9 +2118,9 @@ async def delete_message(
     try:
         cl = get_client(account)
         entity = await resolve_entity(chat_id, cl)
-        if await _ids_outside_chat(cl, entity, [message_id]):
-            return f"Message {message_id} is not in chat {chat_id}; nothing was deleted."
         message = await cl.get_messages(entity, ids=message_id)
+        if message is None and not isinstance(entity, Channel):
+            return f"Message {message_id} is not in chat {chat_id}; nothing was deleted."
         if not message or not getattr(message, "out", False):
             return json.dumps({"deleted": False, "reason": "not_own_message"})
         await cl.delete_messages(entity, message_id)

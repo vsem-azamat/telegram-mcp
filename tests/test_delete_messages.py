@@ -28,7 +28,7 @@ class AccountServer(TelegramClient):
         super().__init__(StringSession(), 12345, "dummy_hash")
         self.server = {
             message_id: types.Message(
-                id=message_id, peer_id=types.PeerUser(user_id), date=NOW, message="hi"
+                id=message_id, peer_id=types.PeerUser(user_id), date=NOW, message="hi", out=True
             )
             for message_id, user_id in chat_of_message.items()
         }
@@ -106,7 +106,7 @@ async def test_delete_messages_bulk_deletes_messages_of_the_chat(account):
 
 
 @pytest.mark.asyncio
-async def test_delete_message_in_a_channel_skips_the_ownership_lookup(monkeypatch):
+async def test_delete_message_in_a_channel_checks_only_ownership(monkeypatch):
     channel = Channel(
         id=1555000000, title="Team", photo=ChatPhotoEmpty(), date=NOW, megagroup=True
     )
@@ -116,7 +116,7 @@ async def test_delete_message_in_a_channel_skips_the_ownership_lookup(monkeypatc
             self.deleted = None
 
         async def get_messages(self, *args, **kwargs):
-            raise AssertionError("channel deletes are already scoped by Telegram")
+            return SimpleNamespace(out=True)
 
         async def delete_messages(self, entity, message_ids):
             self.deleted = (entity, message_ids)
@@ -150,7 +150,7 @@ async def test_delete_messages_bulk_in_a_channel_skips_the_ownership_lookup(monk
             self.requests = []
 
         async def get_messages(self, *args, **kwargs):
-            raise AssertionError("channel deletes are already scoped by Telegram")
+            return SimpleNamespace(out=True)
 
         async def __call__(self, request):
             self.requests.append(request)
