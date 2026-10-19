@@ -421,7 +421,34 @@ async def test_nothing_left_to_grant_is_refused_instead_of_demoting(install):
     result = await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
 
     assert "nothing" in result.lower()
+    assert "admin with no rights" in result and 'rights={"other": true}' in result
+    assert "demote" not in result
     assert client.edits() == []
+
+
+@pytest.mark.asyncio
+async def test_creator_with_every_right_false_but_other_gets_the_no_rights_hint(install):
+    client = install(FakeClient())
+    rights = {name: False for name in LAYER_RIGHTS if name != "other"}
+
+    result = await groups.promote_admin(CHANNEL_ID, USER_ID, rights=rights, account=None)
+
+    assert "admin with no rights" in result and "demote" not in result
+    assert client.edits() == []
+
+
+@pytest.mark.asyncio
+async def test_other_named_in_rights_makes_an_admin_without_rights(install):
+    only = types.ChannelParticipantAdmin(
+        user_id=1, promoted_by=99, date=None, admin_rights=_rights(["add_admins"])
+    )
+    client = install(FakeClient(me=only))
+
+    result = await groups.promote_admin(CHANNEL_ID, USER_ID, rights={"other": True}, account=None)
+
+    assert result.startswith("Successfully promoted")
+    (edit,) = client.edits()
+    assert _granted(edit) == {"other"}
 
 
 @pytest.mark.asyncio
@@ -500,6 +527,7 @@ async def test_all_rights_false_is_refused_without_an_empty_skip_clause(install)
 
     assert "nothing" in result.lower()
     assert "skipping" not in result and ";" not in result
+    assert "demote" in result
     assert client.edits() == []
 
 
@@ -543,5 +571,7 @@ async def test_right_forbidden_mentions_rights_set_by_someone_else(install):
 def test_docstring_says_the_whole_rights_set_is_replaced():
     doc = " ".join(groups.promote_admin.__doc__.split())
     assert "replaces the user's whole set of admin rights" in doc
+    assert "other counts as held whenever you hold any right" in doc
+    assert "other alone is granted only when named in rights" in doc
     assert "removed" in doc
     assert "as is" not in doc

@@ -757,13 +757,15 @@ def _plan_rights(requested, explicit, held, chat):
     granted = [name for name in ADMIN_RIGHTS if requested[name] and name not in skipped]
     # `other` alone makes an admin without rights: only when asked for by name.
     if not [name for name in granted if name != "other" or explicit.get("other")]:
-        return (
-            None,
-            None,
-            "Error: nothing left to grant"
-            + (f" after skipping {_skipped_text(skipped)}" if skipped else "")
-            + ". Sending no rights would demote the user (demote_admin does that).",
-        )
+        after = f" after skipping {_skipped_text(skipped)}" if skipped else ""
+        if granted:
+            outcome = (
+                " Only other is left, which would make the user an admin with no rights; "
+                'rights={"other": true} does exactly that.'
+            )
+        else:
+            outcome = " Sending no rights would demote the user (demote_admin does that)."
+        return None, None, f"Error: nothing left to grant{after}.{outcome}"
     return granted, skipped, None
 
 
@@ -848,6 +850,10 @@ async def promote_admin(
     nothing is sent. If your own rights cannot be looked up, the preset with your
     `rights` overrides is sent without checking it against yours (chat-kind skips
     still apply), and the result says so.
+
+    other counts as held whenever you hold any right (it covers the admin log,
+    statistics and members). other alone is granted only when named in rights:
+    rights={"other": true} makes the user an admin with no other rights.
 
     The call replaces the user's whole set of admin rights: a right the user already
     has but that is not granted here (skipped or set to false) is removed. Check the
