@@ -39,7 +39,7 @@ async def test_single_file_omits_force_document_by_default(client_and_root):
 
     result = await media.send_file("Chat", "shot.png", caption="cap")
 
-    assert result == f"File sent to chat Chat from {root / 'shot.png'}."
+    assert result == "File sent to chat Chat."
     assert client.calls == [
         {
             "entity": "entity:Chat",
@@ -57,7 +57,7 @@ async def test_single_file_force_document_true_is_passed_through(client_and_root
 
     result = await media.send_file("Chat", "shot.png", caption="cap", force_document=True)
 
-    assert result == f"File sent to chat Chat from {root / 'shot.png'}."
+    assert result == "File sent to chat Chat."
     assert client.calls == [
         {
             "entity": "entity:Chat",
