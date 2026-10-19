@@ -687,8 +687,7 @@ def _right_forbidden_message(admin_rights) -> str:
     example = ", ".join(f'"{name}": false' for name in granted[-2:])
     return (
         "Error: Telegram refused some of the requested rights. You can only grant rights "
-        "you hold yourself, and some exist only in channels (post_messages, "
-        "edit_messages) or need a feature the chat lacks. Requested: "
+        "you hold yourself. Requested: "
         f"{', '.join(granted)}. Drop the ones you lack with rights={{{example}}}."
     )
 
@@ -746,6 +745,12 @@ async def promote_admin(
         cl = get_client(account)
         chat = await resolve_entity(group_id, cl)
         if isinstance(chat, Chat):
+            channel_id = getattr(getattr(chat, "migrated_to", None), "channel_id", None)
+            if channel_id:
+                return (
+                    f"Error: {group_id} is a basic group that was already upgraded to a "
+                    f"supergroup. Call promote_admin with the supergroup's ID -100{channel_id}."
+                )
             return (
                 f"Error: {group_id} is a basic group, which has no per-admin rights or "
                 "titles. Upgrade it with upgrade_group_to_supergroup (the chat gets a new "

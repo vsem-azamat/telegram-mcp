@@ -256,6 +256,36 @@ async def test_right_forbidden_names_the_rights_to_drop(install):
     assert "error occurred" not in result
     assert "rights=" in result and "false" in result
     assert "post_stories" in result  # a granted right the caller may lack is named
+    requested = result.split("Requested: ", 1)[1].split(". ", 1)[0].split(", ")
+    assert "add_admins" not in requested and "anonymous" not in requested
+    assert set(requested) == set(groups.ADMIN_RIGHTS) - {"add_admins", "anonymous"}
+    assert "exist only in channels" not in result
+
+
+@pytest.mark.asyncio
+async def test_migrated_basic_group_points_at_its_supergroup(install, monkeypatch):
+    client = install(FakeClient())
+    migrated = types.Chat(
+        id=5317263588,
+        title="Old Group",
+        photo=types.ChatPhotoEmpty(),
+        participants_count=0,
+        date=None,
+        version=1,
+        deactivated=True,
+        migrated_to=types.InputChannel(channel_id=1234567890, access_hash=1),
+    )
+
+    async def _resolve(identifier, _client):
+        return migrated if identifier == -5317263588 else SimpleNamespace(id=identifier)
+
+    monkeypatch.setattr(groups, "resolve_entity", _resolve)
+
+    result = await groups.promote_admin(-5317263588, USER_ID, account=None)
+
+    assert "already upgraded" in result and "-1001234567890" in result
+    assert "upgrade_group_to_supergroup" not in result
+    assert client.requests == []
 
 
 @pytest.mark.parametrize("value", ["yes", 1, "true", 0])
