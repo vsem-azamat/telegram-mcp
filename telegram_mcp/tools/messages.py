@@ -995,8 +995,10 @@ async def send_message(
                     document_id=document_id,
                 )
             ]
-            await cl.send_message(entity, message, formatting_entities=formatting_entities)
-            return "Message sent successfully."
+            sent = await cl.send_message(
+                entity, message, formatting_entities=formatting_entities, reply_to=reply_to
+            )
+            return _sent_result(sent)
         conflict = _plain_text_conflict(parse_mode, format_date, custom_emojis)
         if conflict:
             return conflict

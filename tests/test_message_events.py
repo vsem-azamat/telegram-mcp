@@ -865,3 +865,13 @@ async def test_profile_photo_errors_are_reported_without_details(client, monkeyp
     assert "secret" not in result
     with pytest.raises(json.JSONDecodeError):
         json.loads(result)
+
+
+@pytest.mark.asyncio
+async def test_custom_emoji_id_send_replies_and_names_the_id(send_client):
+    result = await messages.send_message(
+        42, "🤖 hello", custom_emoji_id="12345", reply_to=5513, account="test"
+    )
+
+    assert result == "Message sent successfully. message_id=5515"
+    assert send_client.send_message.call_args.kwargs["reply_to"] == 5513
