@@ -957,9 +957,10 @@ async def send_message(
             (it can expire or be bought at any time).
         reply_to: Optional id of a message in the same chat to reply to. To post
             in a forum topic, pass the topic id (from list_topics).
-        custom_emoji_id: Optional Telegram custom-emoji document ID. When set, the first
-            Unicode character in the plain-text message is sent as that custom emoji.
-            Cannot be combined with parse_mode.
+        custom_emoji_id: Optional Telegram custom-emoji document ID. Pass it as a
+            string of digits: a JSON number this large is rounded on the way and refused.
+            When set, the first Unicode character in the plain-text message is sent as
+            that custom emoji. Cannot be combined with parse_mode.
     """
     try:
         cl = get_client(account)

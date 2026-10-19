@@ -599,6 +599,10 @@ async def test_custom_emoji_id_small_number_is_exact_and_accepted(send_client):
     assert entity.document_id == 12345
 
 
+def test_custom_emoji_id_docstring_asks_for_a_string():
+    assert "string of digits" in messages.send_message.__doc__
+
+
 def test_raw_send_result_id_is_found():
     short = types.UpdateShortSentMessage(id=77, pts=1, pts_count=1, date=DATE)
     assert messages._first_sent_message_id(short) == 77
