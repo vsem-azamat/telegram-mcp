@@ -2,6 +2,8 @@
 
 from mcp.server.fastmcp.exceptions import ToolError
 
+from pydantic import StrictBool
+
 from telegram_mcp.runtime import *
 
 
@@ -679,16 +681,16 @@ def _promote_rights(preset, rights):
     return ChatAdminRights(**{**base, **rights}), None
 
 
-async def _current_admin_rank(cl, chat, user) -> str:
-    """The user's admin title in chat, or "" when they are not an admin or have none."""
-    try:
-        result = await cl(functions.channels.GetParticipantRequest(channel=chat, participant=user))
-    except telethon.errors.rpcerrorlist.UserNotParticipantError:
-        return ""
-    participant = result.participant
-    if isinstance(participant, (types.ChannelParticipantAdmin, types.ChannelParticipantCreator)):
-        return participant.rank or ""
-    return ""
+def _right_forbidden_message(admin_rights) -> str:
+    """RightForbiddenError explained: the rights that were asked for and how to drop some."""
+    granted = [name for name in ADMIN_RIGHTS if getattr(admin_rights, name)]
+    example = ", ".join(f'"{name}": false' for name in granted[-2:])
+    return (
+        "Error: Telegram refused some of the requested rights. You can only grant rights "
+        "you hold yourself, and some exist only in channels (post_messages, "
+        "edit_messages) or need a feature the chat lacks. Requested: "
+        f"{', '.join(granted)}. Drop the ones you lack with rights={{{example}}}."
+    )
 
 
 @mcp.tool(
@@ -701,13 +703,16 @@ async def _current_admin_rank(cl, chat, user) -> str:
 async def promote_admin(
     group_id: Union[int, str],
     user_id: Union[int, str],
-    rights: Optional[Dict[str, bool]] = None,
+    rights: Optional[Dict[str, StrictBool]] = None,
     rank: Optional[str] = None,
     preset: Optional[str] = None,
     account: Optional[str] = None,
 ) -> str:
     """
     Promote a user to admin in a supergroup/channel, or change an admin's rights.
+
+    Basic groups are refused: they have no per-admin rights or titles. Upgrade one
+    with upgrade_group_to_supergroup (the chat gets a new ID) and promote there.
 
     Args:
         group_id: ID or username of the supergroup/channel
@@ -719,8 +724,8 @@ async def promote_admin(
             delete_stories, manage_direct_messages, manage_ranks (edit members'
             tags), manage_linked_peers, manage_welcome_messages. An unknown name
             is refused.
-        rank: Admin title, at most 16 characters ("" clears it). When omitted, an
-            admin keeps the title they already have and anyone else gets none.
+        rank: Admin title, at most 16 characters. When omitted, the user's current
+            rank (an admin's title or a member's tag) is left unchanged; "" clears it.
         preset: Starting rights before `rights` apply. "all_except_add_admins"
             (default) grants every right except add_admins and anonymous (an
             anonymous admin's actions show as the chat's, so it is granted only
@@ -740,9 +745,13 @@ async def promote_admin(
 
         cl = get_client(account)
         chat = await resolve_entity(group_id, cl)
+        if isinstance(chat, Chat):
+            return (
+                f"Error: {group_id} is a basic group, which has no per-admin rights or "
+                "titles. Upgrade it with upgrade_group_to_supergroup (the chat gets a new "
+                "ID), then call promote_admin with the supergroup's ID."
+            )
         user = await resolve_entity(user_id, cl)
-        if rank is None:
-            rank = await _current_admin_rank(cl, chat, user)
 
         try:
             await cl(
@@ -756,6 +765,8 @@ async def promote_admin(
                 "Error: Cannot promote users who are not mutual contacts. "
                 "Please ensure the user is in your contacts and has added you back."
             )
+        except telethon.errors.rpcerrorlist.RightForbiddenError:
+            return _right_forbidden_message(admin_rights)
         except Exception as e:
             return log_and_format_error("promote_admin", e, group_id=group_id, user_id=user_id)
 

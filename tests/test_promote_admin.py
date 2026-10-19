@@ -4,7 +4,9 @@ import inspect
 from types import SimpleNamespace
 
 import pytest
-from telethon.errors.rpcerrorlist import UserNotParticipantError
+from mcp.server.fastmcp.utilities.func_metadata import func_metadata
+from pydantic import ValidationError
+from telethon.errors.rpcerrorlist import RightForbiddenError, UserNotParticipantError
 from telethon.tl import functions, types
 from telethon.tl.types import ChatAdminRights
 
@@ -168,58 +170,39 @@ async def test_unknown_preset_is_refused(install):
 
 
 @pytest.mark.asyncio
-async def test_rank_is_kept_for_an_existing_admin(install):
-    client = install(FakeClient(participant=_admin("Moderator")))
-
-    await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
-
-    assert len(client.lookups()) == 1
-    assert client.edits()[0].rank == "Moderator"
-
-
-@pytest.mark.asyncio
-async def test_rank_is_kept_for_the_creator(install):
-    creator = types.ChannelParticipantCreator(
-        user_id=USER_ID, admin_rights=ChatAdminRights(add_admins=True), rank="Owner"
-    )
-    client = install(FakeClient(participant=creator))
-
-    await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
-
-    assert client.edits()[0].rank == "Owner"
-
-
-@pytest.mark.asyncio
-async def test_admin_without_rank_keeps_an_empty_rank(install):
-    client = install(FakeClient(participant=_admin(None)))
-
-    await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
-
-    assert client.edits()[0].rank == ""
-
-
-@pytest.mark.asyncio
-async def test_member_gets_an_empty_rank(install):
-    client = install(FakeClient(participant=types.ChannelParticipant(user_id=USER_ID, date=None)))
-
-    await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
-
-    assert client.edits()[0].rank == ""
-
-
-@pytest.mark.asyncio
-async def test_non_participant_gets_an_empty_rank(install):
-    client = install(FakeClient(lookup_error=UserNotParticipantError(None)))
+@pytest.mark.parametrize(
+    "participant",
+    [_admin("Moderator"), types.ChannelParticipant(user_id=USER_ID, date=None, rank="VIP")],
+)
+async def test_omitted_rank_leaves_the_rank_unchanged(install, participant):
+    # channels.editAdmin leaves the rank (an admin's title or a member's tag) alone
+    # when the flag is unset, which Telethon does only for rank=None.
+    client = install(FakeClient(participant=participant))
 
     result = await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
 
     assert result.startswith("Successfully promoted")
-    assert client.edits()[0].rank == ""
+    assert client.lookups() == []
+    (edit,) = client.edits()
+    assert edit.rank is None
+
+
+def test_telethon_leaves_the_rank_flag_unset_for_none():
+    def request(rank):
+        return functions.channels.EditAdminRequest(
+            channel=types.InputChannel(1, 2),
+            user_id=types.InputUser(3, 4),
+            admin_rights=ChatAdminRights(),
+            rank=rank,
+        )._bytes()
+
+    assert request(None)[4:8] == b"\x00\x00\x00\x00"  # flags.0 unset: rank unchanged
+    assert request("")[4:8] == b"\x01\x00\x00\x00"  # "" is sent and clears it
 
 
 @pytest.mark.asyncio
-async def test_explicit_rank_is_used_without_a_lookup(install):
-    client = install(FakeClient(participant=_admin("Moderator")))
+async def test_explicit_rank_is_sent(install):
+    client = install(FakeClient())
 
     await groups.promote_admin(CHANNEL_ID, USER_ID, rank="Bot", account=None)
 
@@ -229,12 +212,67 @@ async def test_explicit_rank_is_used_without_a_lookup(install):
 
 @pytest.mark.asyncio
 async def test_explicit_empty_rank_clears_it(install):
-    client = install(FakeClient(participant=_admin("Moderator")))
+    client = install(FakeClient())
 
     await groups.promote_admin(CHANNEL_ID, USER_ID, rank="", account=None)
 
-    assert client.lookups() == []
     assert client.edits()[0].rank == ""
+
+
+@pytest.mark.asyncio
+async def test_basic_group_is_refused_with_what_to_do(install, monkeypatch):
+    client = install(FakeClient())
+    basic = types.Chat(
+        id=5317263588,
+        title="Basic Group",
+        photo=types.ChatPhotoEmpty(),
+        participants_count=3,
+        date=None,
+        version=1,
+    )
+
+    async def _resolve(identifier, _client):
+        return basic if identifier == -5317263588 else SimpleNamespace(id=identifier)
+
+    monkeypatch.setattr(groups, "resolve_entity", _resolve)
+
+    result = await groups.promote_admin(-5317263588, USER_ID, account=None)
+
+    assert "basic group" in result and "upgrade_group_to_supergroup" in result
+    assert client.requests == []
+
+
+@pytest.mark.asyncio
+async def test_right_forbidden_names_the_rights_to_drop(install):
+    class Forbidden(FakeClient):
+        async def __call__(self, request):
+            self.requests.append(request)
+            raise RightForbiddenError(None)
+
+    install(Forbidden())
+
+    result = await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
+
+    assert "error occurred" not in result
+    assert "rights=" in result and "false" in result
+    assert "post_stories" in result  # a granted right the caller may lack is named
+
+
+@pytest.mark.parametrize("value", ["yes", 1, "true", 0])
+def test_mcp_arguments_refuse_non_bool_rights(value):
+    model = func_metadata(groups.promote_admin).arg_model
+    with pytest.raises(ValidationError):
+        model.model_validate(
+            {"group_id": CHANNEL_ID, "user_id": USER_ID, "rights": {"ban_users": value}}
+        )
+
+
+def test_mcp_arguments_accept_bool_rights():
+    model = func_metadata(groups.promote_admin).arg_model
+    args = model.model_validate(
+        {"group_id": CHANNEL_ID, "user_id": USER_ID, "rights": {"ban_users": False}}
+    )
+    assert args.rights == {"ban_users": False}
 
 
 @pytest.mark.asyncio
