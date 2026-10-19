@@ -43,7 +43,11 @@ def _rights(names):
     return ChatAdminRights(**{name: True for name in names})
 
 
-CREATOR = types.ChannelParticipantCreator(user_id=1, admin_rights=_rights(LAYER_RIGHTS))
+# Telegram reports the creator's own flags; a creator who is not anonymous lacks that one
+# but can still grant it.
+CREATOR = types.ChannelParticipantCreator(
+    user_id=1, admin_rights=_rights(set(LAYER_RIGHTS) - {"anonymous"})
+)
 
 
 def _caller_admin(lacks=(), add_admins=True):
@@ -366,6 +370,7 @@ async def test_admin_caller_without_add_admins_is_refused(install):
     [
         FakeClient(me=types.ChannelParticipant(user_id=1, date=None)),
         FakeClient(me_error=UserNotParticipantError(None)),
+        FakeClient(me_error=ChatAdminRequiredError(None)),
     ],
 )
 async def test_caller_who_is_not_an_admin_is_refused(install, client):
@@ -421,7 +426,7 @@ async def test_nothing_left_to_grant_is_refused_instead_of_demoting(install):
 
 @pytest.mark.asyncio
 async def test_failed_self_lookup_falls_back_to_the_preset(install):
-    client = install(FakeClient(me_error=ChatAdminRequiredError(None)))
+    client = install(FakeClient(me_error=TimeoutError()))
 
     result = await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
 
@@ -429,6 +434,7 @@ async def test_failed_self_lookup_falls_back_to_the_preset(install):
     assert _granted(edit) == set(LAYER_RIGHTS) - DEFAULT_OFF - CHANNEL_ONLY
     assert result.startswith("Successfully promoted")
     assert "could not check your own rights" in result
+    assert "as is" not in result
 
 
 @pytest.mark.asyncio
@@ -445,9 +451,7 @@ async def test_flood_wait_on_the_self_lookup_is_reported_and_nothing_is_sent(ins
 
 @pytest.mark.asyncio
 async def test_right_forbidden_with_unknown_own_rights_names_no_list_tail(install):
-    client = install(
-        FakeClient(me_error=ChatAdminRequiredError(None), edit_error=RightForbiddenError(None))
-    )
+    client = install(FakeClient(me_error=TimeoutError(), edit_error=RightForbiddenError(None)))
 
     result = await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
 
@@ -472,3 +476,72 @@ async def test_right_forbidden_with_known_own_rights_says_they_are_held(install)
     assert "you hold all of them" in result
     for name in FIELD_LACKS:
         assert name in result.split("Requested: ", 1)[0]  # named as skipped, not requested
+
+
+@pytest.mark.asyncio
+async def test_creator_who_is_not_anonymous_can_grant_anonymous(install):
+    client = install(FakeClient())
+
+    result = await groups.promote_admin(
+        CHANNEL_ID, USER_ID, rights={"anonymous": True}, account=None
+    )
+
+    assert result.startswith("Successfully promoted")
+    assert "anonymous" in _granted(client.edits()[0])
+
+
+@pytest.mark.asyncio
+async def test_all_rights_false_is_refused_without_an_empty_skip_clause(install):
+    client = install(FakeClient())
+
+    result = await groups.promote_admin(
+        CHANNEL_ID, USER_ID, rights={name: False for name in LAYER_RIGHTS}, account=None
+    )
+
+    assert "nothing" in result.lower()
+    assert "skipping" not in result and ";" not in result
+    assert client.edits() == []
+
+
+@pytest.mark.asyncio
+async def test_other_is_implied_by_any_right_the_caller_holds(install):
+    me = types.ChannelParticipantAdmin(
+        user_id=1,
+        promoted_by=99,
+        date=None,
+        admin_rights=_rights(["add_admins", "ban_users"]),  # Telegram may leave other unset
+    )
+    client = install(FakeClient(me=me))
+
+    result = await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
+
+    assert _granted(client.edits()[0]) == {"ban_users", "other"}
+    assert "other (you don't have it)" not in result
+
+
+@pytest.mark.asyncio
+async def test_lookup_failure_says_what_was_sent(install):
+    client = install(FakeClient(me_error=TimeoutError()))
+
+    result = await groups.promote_admin(
+        CHANNEL_ID, USER_ID, rights={"post_stories": False}, account=None
+    )
+
+    assert "post_stories" not in _granted(client.edits()[0])
+    assert "not checked against your own" in result
+
+
+@pytest.mark.asyncio
+async def test_right_forbidden_mentions_rights_set_by_someone_else(install):
+    install(FakeClient(edit_error=RightForbiddenError(None)))
+
+    result = await groups.promote_admin(CHANNEL_ID, USER_ID, account=None)
+
+    assert "set by someone else" in result
+
+
+def test_docstring_says_the_whole_rights_set_is_replaced():
+    doc = " ".join(groups.promote_admin.__doc__.split())
+    assert "replaces the user's whole set of admin rights" in doc
+    assert "removed" in doc
+    assert "as is" not in doc
