@@ -568,6 +568,37 @@ async def test_custom_emoji_id_refuses_custom_emojis(send_client):
     send_client.send_message.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_custom_emoji_id_number_beyond_json_precision_is_refused(send_client):
+    # 5359394246468057650 sent as a JSON number arrives rounded to the nearest double.
+    result = await messages.send_message(
+        42, "🤖 hello", custom_emoji_id=5359394246468058000, account="test"
+    )
+
+    assert "string" in result and "2^53" in result
+    assert "error occurred" not in result
+    send_client.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["abc", "-5", "", "1e18", True, 2**63])
+async def test_custom_emoji_id_that_is_not_a_document_id_is_refused(send_client, bad):
+    result = await messages.send_message(42, "🤖 hello", custom_emoji_id=bad, account="test")
+
+    assert "custom_emoji_id" in result
+    assert "error occurred" not in result
+    send_client.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_custom_emoji_id_small_number_is_exact_and_accepted(send_client):
+    result = await messages.send_message(42, "🤖 hello", custom_emoji_id=12345, account="test")
+
+    assert result.endswith("message_id=5515")
+    (entity,) = send_client.send_message.call_args.kwargs["formatting_entities"]
+    assert entity.document_id == 12345
+
+
 def test_raw_send_result_id_is_found():
     short = types.UpdateShortSentMessage(id=77, pts=1, pts_count=1, date=DATE)
     assert messages._first_sent_message_id(short) == 77

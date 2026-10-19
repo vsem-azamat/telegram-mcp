@@ -797,6 +797,31 @@ def _custom_emoji_id(value):
     return value
 
 
+_JSON_SAFE_INT = 2**53
+
+
+def _legacy_custom_emoji_id(value):
+    """Return (document_id, None) for send_message's custom_emoji_id, or (None, error).
+
+    Document IDs are above 2^53, where a JSON number is rounded to the nearest double
+    before it reaches the server: the rounded ID names no emoji and Telegram refuses the
+    send. Such numbers are refused here so the caller resends the ID as a string.
+    """
+    if isinstance(value, int) and not isinstance(value, bool) and value > _JSON_SAFE_INT:
+        return None, (
+            f"custom_emoji_id {value} is a number above 2^53, which JSON clients round "
+            "on the way, so it is probably not the ID you meant. Pass the ID as a "
+            'string of digits, e.g. custom_emoji_id="5359394246468057650".'
+        )
+    document_id = _custom_emoji_id(value)
+    if document_id is None:
+        return None, (
+            f"custom_emoji_id {value!r} must be a Telegram custom-emoji document ID: "
+            "a string of digits."
+        )
+    return document_id, None
+
+
 def _custom_emoji_item(item):
     """Return (fallback, document_id, None) for one custom_emojis entry, or an error."""
     if not isinstance(item, dict) or set(item) != {"emoji", "id"}:
@@ -956,6 +981,9 @@ async def send_message(
                     "custom_emoji_id cannot be combined with parse_mode, format_date "
                     "or custom_emojis."
                 )
+            document_id, error = _legacy_custom_emoji_id(custom_emoji_id)
+            if error:
+                return error
             if not message:
                 return "custom_emoji_id requires a non-empty message."
             first_char_utf16_length = len(message[0].encode("utf-16-le")) // 2
@@ -963,7 +991,7 @@ async def send_message(
                 types.MessageEntityCustomEmoji(
                     offset=0,
                     length=first_char_utf16_length,
-                    document_id=int(custom_emoji_id),
+                    document_id=document_id,
                 )
             ]
             await cl.send_message(entity, message, formatting_entities=formatting_entities)
