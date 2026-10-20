@@ -462,6 +462,7 @@ async def test_failed_self_lookup_falls_back_to_the_preset(install):
     assert _granted(edit) == set(LAYER_RIGHTS) - DEFAULT_OFF - CHANNEL_ONLY
     assert result.startswith("Successfully promoted")
     assert "could not check your own rights" in result
+    assert "your rights overrides still applied" in result
     assert "as is" not in result
 
 
