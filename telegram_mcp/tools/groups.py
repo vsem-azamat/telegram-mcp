@@ -972,7 +972,7 @@ async def demote_admin(
     group_id: Union[int, str], user_id: Union[int, str], account: Optional[str] = None
 ) -> str:
     """
-    Demote a user from admin in a group/channel.
+    Demote a user from admin in a group/channel. Your own account is refused.
 
     Args:
         group_id: ID or username of the group/channel
@@ -985,6 +985,9 @@ async def demote_admin(
         cl = get_client(account)
         chat = await resolve_entity(group_id, cl)
         user = await resolve_entity(user_id, cl)
+        if getattr(user, "is_self", False):
+            # Demoting yourself drops your own rights and, for the creator, anonymity.
+            return f"Error: {user_id} is your own account; demote_admin changes other users only."
 
         # Create empty admin rights (regular user)
         admin_rights = ChatAdminRights(

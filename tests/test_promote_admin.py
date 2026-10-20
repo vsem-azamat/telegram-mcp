@@ -730,7 +730,7 @@ async def test_edit_admin_rights_user_admin_invalid_is_explained(install):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tool", ["promote_admin", "edit_admin_rights"])
+@pytest.mark.parametrize("tool", ["promote_admin", "edit_admin_rights", "demote_admin"])
 async def test_own_account_is_refused(install, monkeypatch, tool):
     client = install(FakeClient())
 
@@ -743,8 +743,21 @@ async def test_own_account_is_refused(install, monkeypatch, tool):
 
     if tool == "edit_admin_rights":
         result = await groups.edit_admin_rights(CHANNEL_ID, "me", other=True, account=None)
+    elif tool == "demote_admin":
+        result = await groups.demote_admin(CHANNEL_ID, "me", account=None)
     else:
         result = await groups.promote_admin(CHANNEL_ID, "me", account=None)
 
     assert "your own account" in result and tool in result
     assert client.edits() == []
+
+
+@pytest.mark.asyncio
+async def test_demote_admin_sends_no_rights_and_clears_the_rank(install):
+    client = install(FakeClient())
+
+    result = await groups.demote_admin(CHANNEL_ID, USER_ID, account=None)
+
+    assert result.startswith("Successfully demoted user 7")
+    (edit,) = client.edits()
+    assert _granted(edit) == set() and edit.rank == ""
