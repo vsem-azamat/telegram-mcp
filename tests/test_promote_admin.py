@@ -1,4 +1,4 @@
-"""Tests for promote_admin: rights presets, the caller's own rights, chat kinds and rank."""
+"""Tests for promote_admin and edit_admin_rights: rights, the caller's own rights, rank."""
 
 import inspect
 from types import SimpleNamespace
@@ -575,3 +575,123 @@ def test_docstring_says_the_whole_rights_set_is_replaced():
     assert "other alone is granted only when named in rights" in doc
     assert "removed" in doc
     assert "as is" not in doc
+
+
+def test_edit_admin_rights_has_a_flag_for_every_right():
+    params = inspect.signature(groups.edit_admin_rights).parameters
+    assert [name for name in LAYER_RIGHTS if name not in params] == []
+    doc = groups.edit_admin_rights.__doc__
+    assert [name for name in LAYER_RIGHTS if name not in doc] == []
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_grants_exactly_the_flags_set(install):
+    client = install(FakeClient())
+
+    result = await groups.edit_admin_rights(
+        CHANNEL_ID, USER_ID, ban_users=True, post_stories=True, account=None
+    )
+
+    assert result.startswith("Admin rights updated for user 7 in Supergroup.")
+    assert "Granted: ban_users, post_stories." in result
+    (edit,) = client.edits()
+    assert _granted(edit) == {"ban_users", "post_stories"}
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_omitted_rank_leaves_the_rank_unchanged(install):
+    client = install(FakeClient())
+
+    await groups.edit_admin_rights(CHANNEL_ID, USER_ID, ban_users=True, account=None)
+
+    assert client.edits()[0].rank is None
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_explicit_empty_rank_clears_it(install):
+    client = install(FakeClient())
+
+    await groups.edit_admin_rights(CHANNEL_ID, USER_ID, ban_users=True, rank="", account=None)
+
+    assert client.edits()[0].rank == ""
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_with_every_flag_false_is_refused(install):
+    client = install(FakeClient())
+
+    result = await groups.edit_admin_rights(CHANNEL_ID, USER_ID, account=None)
+
+    assert "nothing left to grant" in result and "demote_admin" in result
+    assert client.edits() == []
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_refuses_a_right_the_caller_lacks(install):
+    client = install(FakeClient(me=_caller_admin(lacks={"manage_topics"})))
+
+    result = await groups.edit_admin_rights(
+        CHANNEL_ID, USER_ID, ban_users=True, manage_topics=True, account=None
+    )
+
+    assert "manage_topics (you don't have it)" in result
+    assert "<right>=false" in result
+    assert client.edits() == []
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_refuses_a_right_of_the_other_chat_kind(install):
+    client = install(FakeClient())
+
+    result = await groups.edit_admin_rights(CHANNEL_ID, USER_ID, post_messages=True, account=None)
+
+    assert "post_messages (channels only)" in result
+    assert client.edits() == []
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_other_alone_makes_an_admin_without_rights(install):
+    client = install(FakeClient())
+
+    result = await groups.edit_admin_rights(CHANNEL_ID, USER_ID, other=True, account=None)
+
+    assert "Granted: other." in result
+    assert _granted(client.edits()[0]) == {"other"}
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_basic_group_names_the_tool(install, monkeypatch):
+    client = install(FakeClient())
+
+    async def _resolve(identifier, _client):
+        return types.Chat(
+            id=55,
+            title="Basic",
+            photo=types.ChatPhotoEmpty(),
+            participants_count=2,
+            date=None,
+            version=1,
+        )
+
+    monkeypatch.setattr(groups, "resolve_entity", _resolve)
+
+    result = await groups.edit_admin_rights(-55, USER_ID, ban_users=True, account=None)
+
+    assert "basic group" in result and "call edit_admin_rights" in result
+    assert client.requests == []
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_right_forbidden_says_how_to_leave_one_out(install):
+    install(FakeClient(edit_error=RightForbiddenError(None)))
+
+    result = await groups.edit_admin_rights(CHANNEL_ID, USER_ID, ban_users=True, account=None)
+
+    assert "Requested: ban_users." in result and "<right>=false" in result
+
+
+@pytest.mark.parametrize("value", ["true", 1])
+def test_edit_admin_rights_mcp_arguments_refuse_non_bool_flags(value):
+    meta = func_metadata(groups.edit_admin_rights)
+    with pytest.raises(ValidationError):
+        meta.arg_model.model_validate({"chat_id": 1, "user_id": 2, "ban_users": value})
