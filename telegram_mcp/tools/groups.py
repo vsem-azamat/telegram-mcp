@@ -976,7 +976,9 @@ async def demote_admin(
 
     The user's participant is looked up first, and nothing is sent unless they are an
     admin: a member who is not an admin, someone not in the chat, the creator and your
-    own account are refused. Demotion removes every admin right and the admin's title.
+    own account are refused. An admin can demote only the admins they promoted
+    themselves; the creator can demote anyone. Demotion removes every admin right and
+    the admin's title.
     Basic groups are refused.
 
     Args:
@@ -1029,7 +1031,10 @@ async def demote_admin(
                 "the admins they promoted themselves; the creator can demote anyone."
             )
         except telethon.errors.rpcerrorlist.ChatAdminRequiredError:
-            return "Error: you need add_admins in this chat to demote anyone."
+            return (
+                f"Error: Telegram refused to demote {user_id} (CHAT_ADMIN_REQUIRED): you need "
+                "add_admins, and an admin can demote only the admins they promoted themselves."
+            )
         except Exception as e:
             return log_and_format_error("demote_admin", e, group_id=group_id, user_id=user_id)
 

@@ -762,7 +762,8 @@ async def test_own_account_is_refused(install, monkeypatch, tool):
 
 @pytest.mark.asyncio
 async def test_demote_admin_sends_no_rights_and_clears_the_rank(install):
-    client = install(FakeClient(target=_caller_admin()))
+    target = _caller_admin()
+    client = install(FakeClient(target=target))
 
     result = await groups.demote_admin(CHANNEL_ID, USER_ID, account=None)
 
@@ -815,8 +816,19 @@ async def test_demote_admin_refuses_a_basic_group(install, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_demote_admin_right_forbidden_is_explained(install):
-    install(FakeClient(target=_caller_admin(), edit_error=RightForbiddenError(None)))
+    target = _caller_admin()
+    install(FakeClient(target=target, edit_error=RightForbiddenError(None)))
 
     result = await groups.demote_admin(CHANNEL_ID, USER_ID, account=None)
 
     assert "promoted themselves" in result
+
+
+@pytest.mark.asyncio
+async def test_demote_admin_chat_admin_required_on_the_edit_names_both_causes(install):
+    target = _caller_admin()
+    install(FakeClient(target=target, edit_error=ChatAdminRequiredError(None)))
+
+    result = await groups.demote_admin(CHANNEL_ID, USER_ID, account=None)
+
+    assert "CHAT_ADMIN_REQUIRED" in result and "promoted themselves" in result
