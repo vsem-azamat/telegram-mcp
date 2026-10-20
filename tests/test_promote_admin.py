@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from telethon.errors.rpcerrorlist import (
     ChatAdminRequiredError,
     RightForbiddenError,
+    UserAdminInvalidError,
     UserNotParticipantError,
 )
 from telethon.tl import functions, types
@@ -695,3 +696,54 @@ def test_edit_admin_rights_mcp_arguments_refuse_non_bool_flags(value):
     meta = func_metadata(groups.edit_admin_rights)
     with pytest.raises(ValidationError):
         meta.arg_model.model_validate({"chat_id": 1, "user_id": 2, "ban_users": value})
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_unchecked_note_names_no_overrides(install):
+    client = install(FakeClient(me_error=RuntimeError("lookup failed")))
+
+    result = await groups.edit_admin_rights(CHANNEL_ID, USER_ID, ban_users=True, account=None)
+
+    assert "could not check your own rights" in result
+    assert "overrides" not in result and "skips" not in result
+    assert _granted(client.edits()[0]) == {"ban_users"}
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_in_a_channel_refuses_a_group_only_right(install):
+    client = install(FakeClient())
+
+    result = await groups.edit_admin_rights(BROADCAST_ID, USER_ID, pin_messages=True, account=None)
+
+    assert "pin_messages (groups and supergroups only)" in result
+    assert client.edits() == []
+
+
+@pytest.mark.asyncio
+async def test_edit_admin_rights_user_admin_invalid_is_explained(install):
+    install(FakeClient(edit_error=UserAdminInvalidError(None)))
+
+    result = await groups.edit_admin_rights(CHANNEL_ID, USER_ID, ban_users=True, account=None)
+
+    assert "cannot modify admin rights for this user" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool", ["promote_admin", "edit_admin_rights"])
+async def test_own_account_is_refused(install, monkeypatch, tool):
+    client = install(FakeClient())
+
+    async def _resolve(identifier, _client):
+        if identifier == CHANNEL_ID:
+            return _channel()
+        return types.User(id=1, is_self=True)
+
+    monkeypatch.setattr(groups, "resolve_entity", _resolve)
+
+    if tool == "edit_admin_rights":
+        result = await groups.edit_admin_rights(CHANNEL_ID, "me", other=True, account=None)
+    else:
+        result = await groups.promote_admin(CHANNEL_ID, "me", account=None)
+
+    assert "your own account" in result and tool in result
+    assert client.edits() == []
