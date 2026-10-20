@@ -63,8 +63,10 @@ def _caller_admin(lacks=(), add_admins=True):
 class FakeClient:
     """Answers the caller's own GetParticipant with `me`, records every request."""
 
-    def __init__(self, me=CREATOR, me_error=None, edit_error=None):
+    def __init__(self, me=CREATOR, me_error=None, edit_error=None, target=None, target_error=None):
         self.me = me
+        self.target = target
+        self.target_error = target_error
         self.me_error = me_error
         self.edit_error = edit_error
         self.requests = []
@@ -72,7 +74,10 @@ class FakeClient:
     async def __call__(self, request):
         self.requests.append(request)
         if isinstance(request, functions.channels.GetParticipantRequest):
-            assert isinstance(request.participant, types.InputPeerSelf)
+            if not isinstance(request.participant, types.InputPeerSelf):
+                if self.target_error:
+                    raise self.target_error
+                return SimpleNamespace(participant=self.target)
             if self.me_error:
                 raise self.me_error
             return SimpleNamespace(participant=self.me)
@@ -85,7 +90,10 @@ class FakeClient:
 
     def lookups(self):
         return [
-            r for r in self.requests if isinstance(r, functions.channels.GetParticipantRequest)
+            r
+            for r in self.requests
+            if isinstance(r, functions.channels.GetParticipantRequest)
+            and isinstance(r.participant, types.InputPeerSelf)
         ]
 
 
@@ -754,10 +762,61 @@ async def test_own_account_is_refused(install, monkeypatch, tool):
 
 @pytest.mark.asyncio
 async def test_demote_admin_sends_no_rights_and_clears_the_rank(install):
-    client = install(FakeClient())
+    client = install(FakeClient(target=_caller_admin()))
 
     result = await groups.demote_admin(CHANNEL_ID, USER_ID, account=None)
 
     assert result.startswith("Successfully demoted user 7")
     (edit,) = client.edits()
     assert _granted(edit) == set() and edit.rank == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "target, error, expected",
+    [
+        (types.ChannelParticipant(user_id=USER_ID, date=None), None, "is not an admin"),
+        (CREATOR, None, "creator"),
+        (None, UserNotParticipantError(None), "is not in this chat"),
+    ],
+)
+async def test_demote_admin_sends_nothing_unless_the_user_is_an_admin(
+    install, target, error, expected
+):
+    client = install(FakeClient(target=target, target_error=error))
+
+    result = await groups.demote_admin(CHANNEL_ID, USER_ID, account=None)
+
+    assert expected in result
+    assert client.edits() == []
+
+
+@pytest.mark.asyncio
+async def test_demote_admin_refuses_a_basic_group(install, monkeypatch):
+    client = install(FakeClient())
+
+    async def _resolve(identifier, _client):
+        return types.Chat(
+            id=55,
+            title="Basic",
+            photo=types.ChatPhotoEmpty(),
+            participants_count=2,
+            date=None,
+            version=1,
+        )
+
+    monkeypatch.setattr(groups, "resolve_entity", _resolve)
+
+    result = await groups.demote_admin(-55, USER_ID, account=None)
+
+    assert "basic group" in result
+    assert client.requests == []
+
+
+@pytest.mark.asyncio
+async def test_demote_admin_right_forbidden_is_explained(install):
+    install(FakeClient(target=_caller_admin(), edit_error=RightForbiddenError(None)))
+
+    result = await groups.demote_admin(CHANNEL_ID, USER_ID, account=None)
+
+    assert "promoted themselves" in result
