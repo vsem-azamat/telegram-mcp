@@ -350,3 +350,30 @@ def test_plain_message_text_still_wins_over_rich_message():
 
     assert messages.message_to_dict(msg)["text"] == "обычный текст"
     assert "обычный текст" in messages.format_message_line(msg)
+
+
+@pytest.mark.asyncio
+async def test_delete_message_deletes_others_messages_in_a_channel(monkeypatch):
+    # In a supergroup or channel Telegram itself checks the admin right to delete.
+    channel = telethon.tl.types.Channel(id=777, title="Chat", photo=None, date=None)
+
+    class Client:
+        deleted = []
+
+        async def get_messages(self, entity, ids):
+            return SimpleNamespace(out=False)
+
+        async def delete_messages(self, entity, message_id):
+            self.deleted.append((entity, message_id))
+
+    cl = Client()
+    monkeypatch.setattr(messages, "get_client", lambda account=None: cl)
+
+    async def fake_resolve(chat_id, client=None):
+        return channel
+
+    monkeypatch.setattr(messages, "resolve_entity", fake_resolve)
+    result = await messages.delete_message(chat_id=-100777, message_id=2)
+
+    assert result == "Message 2 deleted."
+    assert cl.deleted == [(channel, 2)]

@@ -2145,14 +2145,16 @@ async def delete_message(
 ) -> str:
     """
     Delete a message by ID. The message must belong to chat_id; otherwise nothing is deleted.
+    In a supergroup or channel, an admin with the delete right may delete anyone's message;
+    elsewhere only the account's own messages are deleted.
     """
     try:
         cl = get_client(account)
         entity = await resolve_entity(chat_id, cl)
         message = await cl.get_messages(entity, ids=message_id)
-        if message is None and not isinstance(entity, Channel):
+        if message is None:
             return f"Message {message_id} is not in chat {chat_id}; nothing was deleted."
-        if not message or not getattr(message, "out", False):
+        if not isinstance(entity, Channel) and not getattr(message, "out", False):
             return json.dumps({"deleted": False, "reason": "not_own_message"})
         await cl.delete_messages(entity, message_id)
         return f"Message {message_id} deleted."
